@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Custom Voice Agent (Vapi)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- Google Places (autocomplete for the company field) -->
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyA-PQqESIZbsYAXTsxSX-PgrGST44HEQH8&libraries=places" async defer></script>
+
+  <!-- Three.js + (optional) Stats for the visualizer -->
+  <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+  <script src="https://unpkg.com/stats.js@0.17.0/build/stats.min.js"></script>
+
+  <style>
+    :root{ --bg:#000;--panel:#0b0b0b;--muted:#aaa;--border:#2a2a2a;--brand:#0af;--ok:#1a8f25;--text:#fff; --bubbleScale:1 }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0;background:var(--bg);color:var(--text);font-family:Helvetica, Arial, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;display:flex;align-items:center;justify-content:center;overflow:hidden}
+    .layout{width:min(740px,95vw);height:min(620px,90vh);display:grid;place-items:center;position:relative}
+    .card{position:absolute;inset:0;margin:auto;background:var(--panel);border:1px solid var(--border);border-radius:18px;padding:22px;box-shadow:0 10px 30px rgba(0,0,0,.35);overflow:hidden;max-width:640px;display:flex;flex-direction:column;transition:opacity .45s ease, transform .45s cubic-bezier(.22,.61,.36,1), visibility .45s step-end}
+    #cardForm{opacity:1;transform:translateY(0);visibility:visible}
+    #cardAgent{opacity:0;transform:translateY(16px) scale(.98);visibility:hidden;pointer-events:none}
+    body.submitted #cardForm{opacity:0;transform:translateY(16px) scale(.98);visibility:hidden}
+    body.submitted #cardAgent{opacity:1;transform:translateY(0) scale(1);visibility:visible;pointer-events:auto}
+
+    .form-wrap{display:flex;flex-direction:column;gap:10px;margin:auto;max-width:520px;width:100%}
+    label{font-size:14px;color:#ddd;margin-bottom:6px;display:block}
+    input{width:100%;padding:12px 14px;background:#111;color:#fff;border:1px solid var(--brand);border-radius:12px;outline:none;font-size:15px}
+    button{width:100%;padding:12px;border-radius:12px;border:0;background:#2f2f2f;color:#fff;font-weight:700;cursor:pointer;transition:transform .08s ease,background .2s ease,opacity .2s ease}
+    button:hover{background:#3a3a3a}
+    button:active{transform:translateY(1px)}
+    .ok{background:var(--ok)}
+    .status{font-size:12px;color:var(--muted);margin-top:10px;min-height:16px;text-align:center}
+
+    .agent{display:flex;flex-direction:column;height:100%}
+    .sphere{position:relative;flex:1;display:grid;place-items:center;border-radius:16px;border:1px solid var(--border);background:#000;overflow:hidden;padding:10px}
+    .viz-wrap{width:100%;max-width:520px;margin:auto;aspect-ratio:1;position:relative;border-radius:50%;overflow:hidden;isolation:isolate;filter: drop-shadow(0 0 28px rgba(120,200,255,.18)) drop-shadow(0 0 70px rgba(100,160,255,.10))}
+    .viz-wrap::after{content:"";position:absolute;inset:0;border-radius:50%;pointer-events:none;box-shadow:0 0 0 1px rgba(180,230,255,.22) inset,0 12px 42px rgba(0,0,0,.58) inset,0 0 110px rgba(128,200,255,.12)}
+    #bubble{position:absolute; inset:6%; border-radius:50%; transform-origin:center; transform:scale(var(--bubbleScale)); background:radial-gradient(circle at 50% 120%, #323232, #0a0a0a 80%, #000 100%); box-shadow:0 0 0 1px rgba(180,220,255,.22) inset,0 0 0 10px rgba(230,245,255,.18) inset,0 26px 70px rgba(0,0,0,.45)}
+    #bubble::before{content:""; position:absolute; inset:0; border-radius:50%; background:radial-gradient(circle at 50% 120%, rgba(255,255,255,.5), rgba(255,255,255,0) 70%); opacity:.6; filter:blur(5px); z-index:1; pointer-events:none}
+    #bubble::after{content:""; position:absolute; inset:0; border-radius:50%; background:radial-gradient(circle at 50% 50%, rgba(255,255,255,.85), rgba(255,255,255,.85) 14%, rgba(255,255,255,0) 24%); transform: translateX(-80px) translateY(-90px) skewX(-20deg); filter: blur(10px); pointer-events:none; z-index:1}
+    #bubble .shadow{position:absolute; inset:0; border-radius:50%; background:radial-gradient(circle at 50% 50%, rgba(0,0,0,.4), rgba(0,0,0,.1) 40%, rgba(0,0,0,0) 50%); transform: rotateX(90deg) translateZ(-150px); z-index:0}
+    .aurora-label{position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); padding:8px 14px;border-radius:999px;border:1px solid rgba(255,255,255,.12); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); background:rgba(10,14,18,.45); color:#eafaff;font-weight:700;letter-spacing:.02em;font-size:14px;text-transform:uppercase; display:flex;align-items:center;gap:10px;z-index:3; box-shadow:0 4px 18px rgba(0,0,0,.35)}
+    .aurora-dot{width:10px;height:10px;border-radius:999px;background:#22d3ee;box-shadow:0 0 12px rgba(34,211,238,.7)}
+    .aurora-label.speaking .aurora-dot{background:#34d399;box-shadow:0 0 14px rgba(52,211,153,.75)}
+    .aurora-label.connecting .aurora-dot{background:#fbbf24;box-shadow:0 0 12px rgba(251,191,36,.7)}
+    .controls{display:flex;gap:12px;align-items:center;justify-content:space-between;margin-top:16px}
+    .pill{display:flex;align-items:center;gap:10px;background:#111;border:1px solid var(--border);padding:10px 14px;border-radius:999px;font-weight:600;min-width:210px}
+    .dot{width:10px;height:10px;border-radius:999px;background:#777}
+    .dot.live{background:#35ff9c;box-shadow:0 0 14px 0 rgba(53,255,156,.45)}
+    .end{width:auto;padding:10px 16px;border-radius:10px;background:#5b1d1d}
+    .end:hover{background:#7a2626}
+    @media (max-width:520px){.layout{width:95vw;height:auto;min-height:100vh;padding:16px}.card{position:relative}}
+    .hidden{display:none !important}
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <!-- FORM -->
+    <div class="card" id="cardForm">
+      <form id="companyForm" class="form-wrap" novalidate>
+        <div>
+          <label>Your company</label>
+          <input id="company" name="company" placeholder="Starbucks, Cr de Rive 11, 1204 Genève" required />
+        </div>
+        <button id="submitBtn" type="submit">Submit</button>
+        <div class="status" id="status">Idle</div>
+      </form>
+    </div>
+
+    <!-- AGENT -->
+    <div class="card" id="cardAgent">
+      <div class="agent hidden" id="agentUI">
+        <div class="sphere">
+          <div class="viz-wrap" id="viz">
+            <div id="bubble" class="hidden" aria-hidden="true"><div class="shadow"></div></div>
+            <div class="aurora-label connecting" id="auroraLabel">
+              <div class="aurora-dot"></div><span id="auroraText">Connecting...</span>
+            </div>
+          </div>
+        </div>
+        <div class="controls">
+          <div class="pill"><div class="dot" id="liveDot"></div><span id="callLabel">Connecting...</span></div>
+          <button id="endBtn" class="end" disabled>End call</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    /* --------------------- Vapi Web SDK --------------------- */
+    import Vapi from "https://unpkg.com/@vapi-ai/web/dist/index.js";
+    const VAPI_PUBLIC_TOKEN = "REPLACE_WITH_YOUR_PUBLIC_VAPI_TOKEN_OR_JWT";
+    const vapi = new Vapi(VAPI_PUBLIC_TOKEN);
+
+    /* --------------------- Config --------------------- */
+    const WEBHOOK_URL = "https://YOUR_N8N_DOMAIN/webhook/REPLACE_ME"; // must return { assistantId, dynamicVariables? }
+    const AUTH_HEADER = 'Basic ' + btoa('yck69:yck69'); // remove if not needed
+
+    /* --------------------- UI handles --------------------- */
+    const statusEl   = document.getElementById("status");
+    const btn        = document.getElementById("submitBtn");
+    const agentUI    = document.getElementById("agentUI");
+    const callLabel  = document.getElementById("callLabel");
+    const liveDot    = document.getElementById("liveDot");
+    const endBtn     = document.getElementById("endBtn");
+    const cardForm   = document.getElementById("cardForm");
+    const cardAgent  = document.getElementById("cardAgent");
+    const auroraLabel= document.getElementById("auroraLabel");
+    const auroraText = document.getElementById("auroraText");
+    const bubble     = document.getElementById("bubble");
+    const vizWrap    = document.getElementById("viz");
+
+    /* --------------------- App state --------------------- */
+    let selectedPlace = {};
+    let localStream = null;
+    let analyser = null, audioCtx = null, dataArray = null;
+    let agentSpeaking = false, userTalking = false, agentSpeakTimer = null, agentCooldownUntil = 0;
+    const setStatus = (t)=> statusEl.textContent = t;
+    const setLive   = (on)=> { liveDot.classList.toggle("live", !!on); callLabel.textContent = on ? "Live" : "Connecting..."; };
+    function setMode(mode){ auroraLabel.classList.remove('connecting','speaking'); if(mode==='connecting'){ auroraLabel.classList.add('connecting'); auroraText.textContent='Connecting...'; } else if(mode==='speaking'){ auroraLabel.classList.add('speaking'); auroraText.textContent='Speaking'; } else { auroraText.textContent='Listening'; } }
+
+    /* --------------------- Places --------------------- */
+    function waitFor(test, timeout=10000, every=120){
+      return new Promise((resolve,reject)=>{
+        const t0 = Date.now();
+        (function loop(){ if (test()) return resolve(); if (Date.now()-t0>timeout) return reject(new Error("Maps timed out")); setTimeout(loop,every); })();
+      });
+    }
+    async function setupPlaces(){
+      try{
+        await waitFor(()=> window.google && google.maps && google.maps.places);
+        const input = document.getElementById("company");
+        const ac = new google.maps.places.Autocomplete(input, {
+          types:["establishment"],
+          fields:["name","formatted_address","place_id","formatted_phone_number","website","types"],
+          strictBounds:false
+        });
+        ac.addListener("place_changed", () => {
+          const p = ac.getPlace();
+          selectedPlace = {
+            name: p?.name || "",
+            address: p?.formatted_address || "",
+            place_id: p?.place_id || "",
+            phone: p?.formatted_phone_number || "",
+            website: p?.website || "",
+            types: Array.isArray(p?.types) ? p.types : []
+          };
+          input.value = [selectedPlace.name, selectedPlace.address].filter(Boolean).join(", ");
+          setStatus("Place selected");
+        });
+        setStatus("Maps ready");
+      }catch(e){ console.error(e); setStatus("Maps blocked or failed"); }
+    }
+    setupPlaces();
+
+    /* --------------------- Simple VAD for the viz --------------------- */
+    const EMA_ALPHA=0.25, TALK_ON=0.09, TALK_OFF=0.05, USER_HOLD_MS=300;
+    function initAudioAnalyser(stream){
+      try{
+        if (audioCtx) return;
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const src = audioCtx.createMediaStreamSource(stream);
+        analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 2048;
+        analyser.smoothingTimeConstant = 0.85;
+        src.connect(analyser);
+        dataArray = new Uint8Array(analyser.frequencyBinCount);
+      }catch(e){ console.warn("Audio analyser unavailable", e); }
+    }
+    let ema=0;
+    function updateVAD(){
+      if(!analyser || !dataArray) return 0;
+      analyser.getByteTimeDomainData(dataArray);
+      let sum=0; for(let i=0;i<dataArray.length;i++){ const v=(dataArray[i]-128)/128; sum+=v*v; }
+      const rms = Math.sqrt(sum/dataArray.length);
+      ema = ema*(1-EMA_ALPHA) + rms*EMA_ALPHA;
+      const now = performance.now();
+      if (agentSpeaking){ userTalking=false; agentCooldownUntil = now + 400; return ema; }
+      if (now < agentCooldownUntil){ userTalking=false; return ema; }
+      if (userTalking){ if (ema < TALK_OFF) userTalking=false; }
+      else if (ema > TALK_ON){ userTalking=true; const t=userTalking; setTimeout(()=>{ if(t===userTalking && ema<TALK_OFF) userTalking=false; }, USER_HOLD_MS); }
+      return ema;
+    }
+
+    /* --------------------- Visualizer --------------------- */
+    let three = { scene:null, camera:null, renderer:null, material:null, mesh:null, stats:null, inited:false };
+    function initThree(){
+      if (three.inited) return;
+      const w = vizWrap.clientWidth, h = vizWrap.clientHeight;
+      const scene = new window.THREE.Scene();
+      const camera = new window.THREE.PerspectiveCamera(75, w/h, 0.1, 1000);
+      const renderer = new window.THREE.WebGLRenderer({ antialias:true, alpha:true });
+      renderer.setSize(w, h);
+      renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+      vizWrap.appendChild(renderer.domElement);
+      const geometry = new window.THREE.SphereGeometry(20, 50, 50);
+      const material = new window.THREE.ShaderMaterial({
+        vertexShader: `
+          uniform float time; uniform float amp;
+          varying vec3 vNormal; varying vec3 vPos;
+          void main(){ vPos=position; vNormal=normalize(normal);
+            vec3 pos=position;
+            float wobble = amp*2.0;
+            pos.z += sin(pos.x*1.0 + time) * wobble;
+            pos.y += sin(pos.x*2.0 + time*1.1) * wobble;
+            pos.x += sin(pos.y*1.5 + time*0.9) * wobble * 0.6;
+            gl_Position=projectionMatrix*modelViewMatrix*vec4(pos,1.0);
+          }`,
+        fragmentShader: `
+          uniform vec3 lightPos; varying vec3 vNormal; varying vec3 vPos;
+          void main(){ vec3 lightDir=normalize(lightPos - vPos);
+            float diff=max(dot(vNormal, lightDir), 0.0);
+            gl_FragColor=vec4(vec3(1.0)*diff,1.0); }`,
+        uniforms:{ time:{value:0}, amp:{value:0.9}, lightPos:{value:new window.THREE.Vector3(0,10,50)} },
+        wireframe:true, transparent:true
+      });
+      const sphere = new window.THREE.Mesh(geometry, material);
+      scene.add(sphere); camera.position.z = 50;
+      let stats=null; try{ stats = new window.Stats(); stats.showPanel(0); vizWrap.appendChild(stats.dom); }catch(_){}
+      three = { scene, camera, renderer, material, mesh:sphere, stats, inited:true };
+      new ResizeObserver(() => {
+        const ww = vizWrap.clientWidth||1, hh = vizWrap.clientHeight||1;
+        renderer.setSize(ww, hh); camera.aspect = ww/hh; camera.updateProjectionMatrix();
+      }).observe(vizWrap);
+    }
+
+    let rafId = 0, visIntensity = 0;
+    const lerp = (a,b,t)=> a + (b-a)*t;
+    function startBubble(){
+      cancelAnimationFrame(rafId); initThree(); bubble.classList.remove("hidden");
+      let last = performance.now();
+      (function loop(now){
+        rafId = requestAnimationFrame(loop);
+        const dt = Math.min(0.05, (now - last)/1000); last = now;
+        const level = updateVAD();
+        setMode(agentSpeaking ? 'speaking' : 'listening');
+        const base = agentSpeaking ? 0.65 : (userTalking ? 0.5 : 0.25);
+        const gain = agentSpeaking ? 1.6 : 1.2;
+        visIntensity = lerp(visIntensity, Math.min(1, base + level*gain), 1 - Math.exp(-dt*10));
+        const t = now*0.001, breath = (Math.sin(t*(agentSpeaking?2.2:1.4))*0.5+0.5);
+        const s = Math.max(0.82, Math.min(1.25, 0.92 + 0.22*visIntensity + 0.06*breath));
+        bubble.style.setProperty('--bubbleScale', s.toFixed(4));
+        if (three.inited){
+          three.material.uniforms.time.value = now*0.001;
+          three.material.uniforms.amp.value  = 0.4 + visIntensity*(agentSpeaking?1.8:1.4);
+          three.stats?.begin(); three.renderer.render(three.scene, three.camera); three.stats?.end();
+        }
+      })(performance.now());
+    }
+
+    /* --------------------- Mic once (for viz) --------------------- */
+    async function ensureMic(){
+      if (localStream && localStream.getAudioTracks().some(t => t.readyState === "live")) return localStream;
+      localStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation:true, noiseSuppression:true }});
+      initAudioAnalyser(localStream);
+      return localStream;
+    }
+
+    /* --------------------- End call / cleanup --------------------- */
+    let endingInProgress = false;
+    async function endCall(reason="user_terminated"){
+      if (endingInProgress) return; endingInProgress = true;
+      endBtn.disabled = true;
+      try { await Promise.race([vapi.stop(), new Promise(r=>setTimeout(r,2000))]); } catch(e){ console.warn("vapi.stop:", e); }
+      try { localStream?.getTracks()?.forEach(t=>{ try{ t.stop(); }catch{} }); } catch {}
+      localStream=null; try{ audioCtx?.close?.(); }catch{}; audioCtx=null; analyser=null; dataArray=null;
+      cancelAnimationFrame(rafId);
+      setLive(false); setStatus("Call ended"); agentSpeaking=false; userTalking=false; setMode('connecting');
+      btn.disabled=false; btn.textContent="Submit"; btn.classList.remove("ok");
+      document.body.classList.remove('submitted'); endBtn.disabled=true; endingInProgress=false;
+    }
+    document.getElementById("endBtn").addEventListener("click", () => endCall("user_clicked_end"));
+    window.addEventListener("beforeunload", () => { try{ vapi.stop(); }catch{} });
+
+    /* --------------------- Submit -> webhook -> start Vapi --------------------- */
+    document.getElementById("companyForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const company = document.getElementById("company").value.trim();
+      if (!company){ setStatus("Please type/select a company."); return; }
+
+      try { await ensureMic(); } catch { setStatus("Microphone permission required"); return; }
+
+      const payload = {
+        input: company,
+        website: selectedPlace.website || "",
+        name: selectedPlace.name || "",
+        address: selectedPlace.address || "",
+        place_id: selectedPlace.place_id || "",
+        phone: selectedPlace.phone || "",
+        types: (selectedPlace.types || []).join(", ")
+      };
+
+      agentUI.classList.remove("hidden");
+      document.body.classList.add('submitted');
+      setLive(false); setMode('connecting'); endBtn.disabled=false;
+      btn.disabled=true; btn.textContent="Submitting..."; setStatus("Calling webhook...");
+      startBubble();
+
+      let data;
+      try{
+        const resp = await fetch(WEBHOOK_URL, {
+          method:"POST",
+          headers:{ "Content-Type":"application/json", "Authorization": AUTH_HEADER },
+          body: JSON.stringify({ body: payload })
+        });
+        if (!resp.ok) throw new Error(`Webhook ${resp.status} ${await resp.text()}`);
+        data = await resp.json(); // { assistantId, dynamicVariables? }
+        if (!data?.assistantId) throw new Error("Webhook did not return assistantId");
+      }catch(err){
+        console.error(err); setStatus(err.message || "Webhook failed");
+        btn.disabled=false; btn.textContent="Submit"; return;
+      }
+
+      try{
+        setStatus("Starting voice agent...");
+        vapi.on("status", (s) => {
+          if (s === "live") { setLive(true); setMode("listening"); }
+          if (s === "connecting") { setLive(false); setMode("connecting"); }
+          if (s === "idle") { setLive(false); }
+        });
+        vapi.on("message", () => {
+          agentSpeaking = true; clearTimeout(agentSpeakTimer);
+          agentSpeakTimer = setTimeout(()=>{ agentSpeaking=false; }, 1200);
+        });
+        vapi.on("call-ended", () => endCall("server_disconnected"));
+        vapi.on("error", (e) => { console.error("Vapi error:", e); setStatus("Agent error — ending call"); endCall("agent_error"); });
+
+        await vapi.start(data.assistantId); // 🎤 WebRTC connection handled by SDK
+
+        setLive(true); endBtn.disabled=false;
+        btn.textContent="Submitted"; btn.classList.add("ok");
+        setStatus("Live ✅"); setMode('listening');
+      }catch(err){
+        console.error(err); setStatus(err.message || "Start failed");
+        endBtn.disabled=true; btn.disabled=false; btn.textContent="Submit";
+      }
+    });
+  </script>
+</body>
+</html>
